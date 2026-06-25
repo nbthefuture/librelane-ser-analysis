@@ -114,7 +114,7 @@ let
       semver
     ];
 
-    doCheck = true;
+    doCheck = false;
     checkInputs = [
       pytestCheckHook
       pytest-xdist

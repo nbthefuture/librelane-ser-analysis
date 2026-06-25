@@ -1,195 +1,266 @@
-<h1 align="center"><img src="docs/_static/logo/librelane-logo-full.svg" width="200px" /></h1>
-<p align="center">
-    <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"/></a>
-    <a href="https://www.python.org"><img src="https://img.shields.io/badge/Python-3.10-3776AB.svg?style=flat&logo=python&logoColor=white" alt="Python ≥3.10" /></a>
-    <a href="https://github.com/psf/black"><img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code Style: black"/></a>
-    <a href="https://mypy-lang.org/"><img src="https://www.mypy-lang.org/static/mypy_badge.svg" alt="Checked with mypy"/></a>
-    <a href="https://nixos.org/"><img src="https://img.shields.io/static/v1?logo=nixos&logoColor=white&label=&message=Built%20with%20Nix&color=41439a" alt="Built with Nix"/></a>
-</p>
-<p align="center">
-    <a href="https://colab.research.google.com/github/librelane/librelane/blob/main/notebook.ipynb"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open in Colab"></a>
-    <a href="https://librelane.readthedocs.io/"><img src="https://readthedocs.org/projects/librelane/badge/?version=latest" alt="Documentation Build Status Badge"/></a>
-    <a href="https://fossi-chat.org"><img src="https://img.shields.io/badge/Community-FOSSi%20Chat-1bb378?logo=element" alt="Invite to FOSSi Chat"/></a>
-</p>
+# LibreLane SER Analysis Pipeline
 
-[LibreLane](https://librelane.org) is a powerful and versatile infrastructure
-library that enables the construction of digital implementation flows for
-application specific integrated circuits (ASICs) based on open-source and
-commercial electronic design automation (EDA) tools.
+This repository contains an automated infrastructure flow for analyzing
+**Soft Error Rates (SER)** on custom digital cell layouts (such as `tto_mux`).
+The pipeline integrates **LibreLane**, **CircuitOps**, **OpenROAD**, and the
+**Sky130 PDK** into a fully reproducible development environment managed via
+**Nix Flakes**.
 
-LibreLane is:
+The core idea: run a design through LibreLane's RTL-to-GDSII flow, automatically
+hand the final layout off to CircuitOps to generate gate-level IR/graph tables,
+build a NetworkX graph from those tables, and compute an analytical
+**Error Propagation Probability (EPP)** estimate — identifying which gates are
+most likely to propagate a soft error (e.g. a cosmic ray strike) to a circuit
+output.
 
-- **Simple to use** – Configure your entire ASIC implementation flow using one
-  file.
+---
 
-- **Free and open source** – With a complementary set of open-source process
-  design kits (PDKs), design and implement your chip without signing a single
-  document. Freely modify both the infrastructure, underlying tools, and PDK to
-  fit your needs – you're in control. Not a vendor.
+##  Prerequisites & System Requirements
 
-- **Flexible and extensible** – Create custom flows, both by simple
-  modifications to the default flows in the configuration file, or by writing
-  Python scripts or plugins to implement advanced functionality.
+- **Operating System:** Linux (Ubuntu 22.04+ recommended) or macOS.
+- **Disk Space:** At least 20–30 GB free (for compiled EDA toolchains and the
+  unpacked Sky130 PDK libraries).
+- **Git:** Installed and configured on your local system.
 
-- **Hermetic** – Rewind and explore alternative configurations without losing
-  data; LibreLane captures explicit snapshots of the configuration and state of
-  your design at every step.
+No Docker is required. No manual Python package installation is required.
+Everything (including `pandas` and `networkx`) is declared in this repo's
+`flake.nix` and provisioned automatically by Nix.
 
-- **Reproducible and traceable** – LibreLane comes packaged with a verified
-  environment of free EDA utilities with a simple goal in mind: same tools, same
-  flow, same configuration; same result. Capture your modifications and
-  engineering change orders (ECOs) as automated steps, and make your flow your
-  documentation.
+---
 
-LibreLane includes two reference flows (`Classic` and `Chip`) that are built
-entirely using open-source EDA tools.
+##  Step-by-Step Setup Guide
 
-You can find the documentation
-[here](https://librelane.readthedocs.io/en/latest/getting_started/) to get
-started. You can discuss LibreLane in the
-[FOSSi Chat Matrix Server](https://fossi-chat.org).
+### Step 1: Clone the Repository
+
+This repo includes CircuitOps as a **git submodule**, so a single recursive
+clone pulls down LibreLane, CircuitOps, and the pipeline scripts together as
+one unit:
+
+```bash
+git clone --recursive https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+cd YOUR_REPO_NAME
+```
+
+> If you ever clone without `--recursive` by mistake, run
+> `git submodule update --init --recursive` afterward to pull in CircuitOps.
+
+### Step 2: Install the Nix Package Manager
+
+Nix ensures that your environment has all required dependencies and packages. No manual configuration should be required for packages such as networkx or pandas.
+
+Run the official multi-user installation script:
+
+```bash
+curl -L https://nixos.org/nix/install | sh -s -- --daemon
+```
+
+Follow the on-screen prompts. Once installation finishes, restart your
+terminal session or follow the commands given in nix.
+
+### Enable Flakes Support
+
+This project uses Nix Flakes directly (`nix develop`), so the experimental
+flakes feature must be enabled. In the same directory, run the following commands:
+
+```bash
+mkdir -p ~/.config/nix
+echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
+```
+
+
+Save and exit. No restart is required — this takes effect on your next
+`nix` command.
+
+### Step 3: Launch the Isolated Environment
+
+From the root of the project directory:
+
+```bash
+nix develop
+```
+
+- **First-run execution:** Nix will download pre-built binaries or compile
+  packages from scratch (including OpenROAD, Yosys, Magic, KLayout, and the
+  Python environment with `pandas`/`networkx` pre-installed). This can take
+  anywhere from **5 to 45 minutes** depending on your hardware and network
+  speed.
+- Subsequent runs are fast (seconds) since Nix caches everything it builds.
+- Once complete, your shell prompt changes to indicate you're inside the
+  active Nix environment.
+
+**Verify the environment is correctly set up:**
+
+```bash
+which openroad
+python3 -c "import pandas, networkx; print('Python deps OK')"
+```
+
+Both commands should succeed with no errors.
+
+---
+
+## PDK Management (Ciel Toolchain)
+
+The SER simulation relies on a locked version of the Sky130 PDK. This
+pipeline targets PDK variant hash:
+
+```
+0fe599b2afb6708d281543108caf8310912f54af
+```
+
+### Locating an Existing Local PDK
+
+If your system has already run Ciel-managed projects before, check whether
+this specific version is already cached (should be located in your root directory once inside the nix shell):
+
+```bash
+ls -la ~/.ciel/ciel/sky130/versions/0fe599b2afb6708d281543108caf8310912f54af/sky130
+```
+
+Or check via the Ciel CLI from inside the `nix develop` shell:
+
+```bash
+ciel ls
+```
+
+### Downloading the PDK (If Missing)
+
+If the `.ciel` directory is empty or this specific hash is missing, fetch
+and activate it:
+
+```bash
+# 1. Fetch the exact tarball distribution
+ciel fetch --pdk-family sky130 0fe599b2afb6708d281543108caf8310912f54af
+
+# 2. Set this hash version as the active PDK
+ciel enable --pdk-family sky130 0fe599b2afb6708d281543108caf8310912f54af
+```
+
+---
+
+##  Configuring the Pipeline Path
+
+Before running the pipeline, point the runner script at your local PDK path.
+
+1. Open the runner file:
+
+```bash
+nano my_designs/tto_mux/run_ser_flow.py
+```
+
+2. Locate the hardcoded PDK path variable and update it with **your**
+   machine's actual home directory and username:
 
 ```python
-from librelane.flows import Flow
-
-Classic = Flow.factory.get("Classic")
-
-flow = Classic(
-    {
-        "PDK": "sky130A",
-        "DESIGN_NAME": "spm",
-        "VERILOG_FILES": ["./src/spm.v"],
-        "CLOCK_PORT": "clk",
-        "CLOCK_PERIOD": 10,
-    },
-    design_dir=".",
-)
-
-flow.start()
+# Replace 'your_username' with your actual system username
+PDK_PATH = "/home/your_username/.ciel/ciel/sky130/versions/0fe599b2afb6708d281543108caf8310912f54af/sky130"
 ```
 
-## Try it out
+> Tip: run `echo $HOME` to confirm your home directory path exactly.
 
-You can try LibreLane right in your browser, free-of-charge, using Google
-Colaboratory by following
-[**this link**](https://colab.research.google.com/github/librelane/librelane/blob/main/notebook.ipynb).
+---
 
-## Installation
+##  Executing the Simulation Pipeline
 
-You'll need the following:
+With your Nix shell active (`nix develop`) and the PDK path configured, run
+the complete analysis:
 
-* Python **3.10** or higher with PIP, Venv and Tkinter
-
-### Nix (Recommended)
-
-Works for macOS and Linux (x86-64 and aarch64). Recommended, as it is more
-integrated with your filesystem and overall has less upload and download deltas.
-
-See
-[Nix-based installation](https://librelane.readthedocs.io/en/latest/installation/nix_installation/index.html)
-in the docs for more info.
-
-### Docker
-
-Works for Windows, macOS and Linux (x86-64 and aarch64).
-
-See
-[Docker-based installation](https://librelane.readthedocs.io/en/latest/installation/docker_installation/index.html)
-in the docs for more info.
-
-Do note you'll need to add `--dockerized` right after `librelane` in most CLI
-invocations.
-
-### Python-only Installation (Advanced, Not Recommended)
-
-**You'll need to bring your own compiled utilities**, but otherwise, simply
-install LibreLane as follows:
-
-```sh
-python3 -m pip install --upgrade librelane
+```bash
+python3 my_designs/tto_mux/run_ser_flow.py
 ```
 
-Python-only installations are presently unsupported and entirely at your own
-risk.
+### What Happens Behind the Scenes
 
-## Usage
+1. **LibreLane Classic Flow** — the design runs through synthesis,
+   floorplanning, placement, CTS, routing, and signoff, producing the final
+   netlist, DEF, SPEF, and SDC files.
+2. **CircuitOps Parsing** — the custom `SERAnalysisStep` stages and
+   compresses these final layout files, then invokes CircuitOps'
+   `generate_tables.py` (via OpenROAD's built-in Python interpreter) to
+   generate gate-level IR/graph tables.
+3. **Graph Construction** — `circuitops_bridge.py` reads the generated CSV
+   IR tables and builds a NetworkX directed graph representing the
+   gate-level circuit.
+4. **SER / EPP Calculation** — `epp_algorithm.py` runs the analytical Error
+   Propagation Probability algorithm (based on the Asadi & Tahoori method)
+   across every gate, identifying average circuit-wide vulnerability and
+   ranking the top hardening candidate gates.
 
-In the root folder of the repository, you may invoke:
+### Where to Find Your Results
 
-```sh
-python3 -m librelane --pdk-root <path/to/pdk> </path/to/config.json>
-```
-
-To start with, you can try:
-
-```sh
-python3 -m librelane --pdk-root $HOME/.ciel ./designs/spm/config.json
-```
-
-## Publication
-
-If you use LibreLane in your research, please cite the following paper.
-
-* M. Shalan and T. Edwards, “Building OpenLANE: A 130nm OpenROAD-based
-  Tapeout-Proven Flow: Invited Paper,” *2020 IEEE/ACM International Conference
-  On Computer Aided Design (ICCAD)*, San Diego, CA, USA, 2020, pp. 1-6.
-  [Paper](https://ieeexplore.ieee.org/document/9256623)
-
-```bibtex
-@INPROCEEDINGS{9256623,
-  author={Shalan, Mohamed and Edwards, Tim},
-  booktitle={2020 IEEE/ACM International Conference On Computer Aided Design (ICCAD)}, 
-  title={Building OpenLANE: A 130nm OpenROAD-based Tapeout- Proven Flow : Invited Paper}, 
-  year={2020},
-  volume={},
-  number={},
-  pages={1-6},
-  doi={}}
-```
-
-## Contributing
-Thank you in advance for considering a contribution to LibreLane!
-
-Please be sure to read our [contributor's guide](https://librelane.readthedocs.io/en/stable/contributors/index.html).
-
-> [!TIP]
->
-> The `main` branch is the stable branch for LibreLane, i.e., this branch is
-> updated less frequently and only accepts bugfixes.
->
-> Feature contributions should be directed towards the `dev` branch.
-
-## License and Legal Info
-
-LibreLane and the LibreLane logo are trademarks of
-[the FOSSi Foundation](https://fossi-foundation.org).
-
-The LibreLane logo was created by [Jon Walters](http://wolde.tv/).
-
-LibreLane code and binaries are available under
-[The Apache License, version 2.0](https://www.apache.org/licenses/LICENSE-2.0.txt),
-except Nix-language files ending with `.nix`, which are available under the
-[MIT License](https://opensource.org/license/mit) as published by the
-Open Source Initiative.
-
-LibreLane is based on [OpenLane 2](https://github.com/efabless/openlane2)
-by Efabless Corporation (assets owned by UmbraLogic Technologies LLC):
+After the run completes, results are written into the LibreLane run
+directory, inside the SER step's own step folder:
 
 ```
-Copyright 2022-2025 UmbraLogic Technologies LLC
+my_designs/tto_mux/runs/ser_extraction_run/<NN>-librelane-seranalysis/
+├── ser_report.txt      # human-readable summary
+└── ser_metrics.json    # machine-readable metrics
+```
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+These metrics are also merged into LibreLane's standard run metrics under:
 
-     http://www.apache.org/licenses/LICENSE-2.0
+- `ser__avg_epp`
+- `ser__max_epp`
+- `ser__gate_count`
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-``` 
+You can inspect the raw CircuitOps IR tables directly at:
 
-UmbraLogic Technologies LLC has agreed to relicense all OpenLane 2 Nix code as
-MIT, for which we are grateful.
+```
+CircuitOps/IRs/sky130hd/tto_mux/
+```
+
+
+
+## Understanding the SER / EPP Report
+
+**EPP (Error Propagation Probability)** is the probability that a fault at a
+given gate propagates through the circuit and changes a primary output. It's
+computed analytically using signal probabilities (assuming each primary
+input is equally likely to be 0 or 1) and the structural masking behavior of
+each gate type (AND, OR, NAND, NOR, XOR, etc.).
+
+- **Average EPP** — overall soft-error sensitivity of the circuit.
+- **Peak EPP** — the single most vulnerable gate's propagation probability.
+- **Top hardening candidates** — gates ranked by individual EPP, useful for
+  prioritizing a limited hardening budget (e.g. redundant logic or hardened
+  cell variants).
+
+---
+
+## Known Limitations
+
+- The EPP algorithm assumes primary inputs are independent and equally
+  likely (P = 0.5). It does not yet model realistic input probability
+  distributions or sequential/temporal correlation.
+- Reconvergent fanout (a fault reaching an output through multiple paths)
+  can cause the analytical method to slightly over-approximate EPP compared
+  to true logic simulation — this is a known property of the underlying
+  Asadi & Tahoori method, not a bug in this implementation.
+- Sequential elements are excluded from the graph; EPP is computed over the
+  combinational logic cone only.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely Cause | Fix |
+|---|---|---|
+| `error: experimental Nix feature 'flakes' is disabled` | `experimental-features` not set in `nix.conf` | Re-check Step 2 — add the line, save, retry `nix develop` |
+| `ModuleNotFoundError: No module named 'pandas'` (or `networkx`) | Not inside the `nix develop` shell, or `flake.nix` changes weren't picked up | Confirm you're inside the shell; if you edited `flake.nix`, exit and re-run `nix develop` to rebuild |
+| `openroad: command not found` | Not inside the Nix dev shell | Run `nix develop` from the repo root first |
+| `FileNotFoundError` referencing CircuitOps paths | Submodule not initialized | Run `git submodule update --init --recursive` |
+| `TypeError: Wrong number or type of arguments for overloaded function 'dbBlock_globalConnect'` | CircuitOps' `openroad_helpers.py` was written against an older OpenROAD ODB API; current OpenROAD's `globalConnect` signature has changed | Check the live signature with `openroad -python -c "import odb; help(odb.dbBlock.globalConnect)"` and update the call in `openroad_helpers.py` to match (see inline comment in that file for the patched call) |
+| PDN / floorplan errors on tiny designs | Die area too small for default PDN strap rules | Use a `DIE_AREA` of at least `[0,0,100,100]` with low `FP_CORE_UTIL` (10–20) in `config.json` |
+| Wrong / outdated PDK path | `PDK_PATH` in `run_ser_flow.py` doesn't match this machine | Re-run the `ciel ls` check from the PDK section and update the path |
+
+---
+
+## Credits
+
+- **LibreLane** — open-source RTL-to-GDSII flow:
+  https://github.com/librelane/librelane
+- **CircuitOps** — ML-friendly circuit graph/IR generation built on
+  OpenROAD: https://github.com/NVlabs/CircuitOps
+- **EPP / SER methodology** — based on the analytical Error Propagation
+  Probability approach introduced by Asadi & Tahoori for soft error rate
+  estimation in digital circuits.

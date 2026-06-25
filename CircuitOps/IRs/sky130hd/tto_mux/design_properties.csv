@@ -1,0 +1,2 @@
+design_name, die_width, die_height, die_area, core_width, core_height, core_area, insts_count, net_count, total_static_power, total_dynamic_power
+tto_mux,100.0,100.0,10000.0,88.78,76.16,6761.4848,730,15,5.246417144038479e-10,0.0007219775652629323

@@ -210,9 +210,8 @@ if __name__ == "__main__":
     flow = CustomSERFlow(
         "config.json",
         pdk="sky130A",
-        #TODO: Update this to use your actual PDK_ROOT path or environment variable
-        pdk_root="/home/nickb/.ciel/ciel/sky130/versions/0fe599b2afb6708d281543108caf8310912f54af"
-        #pdk_root=os.environ.get("PDK_ROOT") or "./pdk"
+        # If you must hardcode your PDK, uncomment the following line with your exact path
+        #pdk_root="/home/nickb/.ciel/ciel/sky130/versions/0fe599b2afb6708d281543108caf8310912f54af"
     )
     
     flow.start(tag="ser_extraction_run")

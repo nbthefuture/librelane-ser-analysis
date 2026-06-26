@@ -15,20 +15,36 @@ output.
 
 ---
 
-##  Prerequisites & System Requirements
+## Table of Contents
+
+- [Prerequisites and System Requirements](#prerequisites-and-system-requirements)
+- [Step-by-Step Setup Guide](#step-by-step-setup-guide)
+- [PDK Management (Ciel Toolchain)](#pdk-management-ciel-toolchain)
+- [Executing the Simulation Pipeline](#executing-the-simulation-pipeline)
+- [Repository Layout](#repository-layout)
+- [Demo Circuit: tto\_mux](#demo-circuit-tto_mux)
+- [Understanding the SER / EPP Report](#understanding-the-ser--epp-report)
+- [Known Limitations](#known-limitations)
+- [Troubleshooting](#troubleshooting)
+- [References](#references)
+- [Credits](#credits)
+
+---
+
+## Prerequisites and System Requirements
 
 - **Operating System:** Linux (Ubuntu 22.04+ recommended) or macOS.
 - **Disk Space:** At least 20–30 GB free (for compiled EDA toolchains and the
   unpacked Sky130 PDK libraries).
 - **Git:** Installed and configured on your local system.
 
-No Docker is required. No manual Python package installation is required.
-Everything (including `pandas` and `networkx`) is declared in this repo's
+No Docker is required. No manual Python package installation is required —
+everything (including `pandas` and `networkx`) is declared in this repo's
 `flake.nix` and provisioned automatically by Nix.
 
 ---
 
-##  Step-by-Step Setup Guide
+## Step-by-Step Setup Guide
 
 ### Step 1: Clone the Repository
 
@@ -37,8 +53,8 @@ clone pulls down LibreLane, CircuitOps, and the pipeline scripts together as
 one unit:
 
 ```bash
-git clone --recursive https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
-cd YOUR_REPO_NAME
+git clone --recursive https://github.com/nbthefuture/librelane-ser-analysis.git
+cd librelane-ser-analysis
 ```
 
 > If you ever clone without `--recursive` by mistake, run
@@ -46,7 +62,8 @@ cd YOUR_REPO_NAME
 
 ### Step 2: Install the Nix Package Manager
 
-Nix ensures that your environment has all required dependencies and packages. No manual configuration should be required for packages such as networkx or pandas.
+Nix ensures that your compiler toolchain, C++ dependencies, and Python environments match identically across machines
+with no manual configuration.
 
 Run the official multi-user installation script:
 
@@ -55,18 +72,25 @@ curl -L https://nixos.org/nix/install | sh -s -- --daemon
 ```
 
 Follow the on-screen prompts. Once installation finishes, restart your
-terminal session or follow the commands given in nix.
+terminal session (or `source` your shell profile) to activate the `nix`
+command.
 
 ### Enable Flakes Support
 
 This project uses Nix Flakes directly (`nix develop`), so the experimental
-flakes feature must be enabled. In the same directory, run the following commands:
+flakes feature must be enabled. Open (or create) your global Nix
+configuration file:
 
 ```bash
 mkdir -p ~/.config/nix
 echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
 ```
 
+Add the following line:
+
+```
+experimental-features = nix-command flakes
+```
 
 Save and exit. No restart is required — this takes effect on your next
 `nix` command.
@@ -101,72 +125,51 @@ Both commands should succeed with no errors.
 
 ## PDK Management (Ciel Toolchain)
 
-The SER simulation relies on a locked version of the Sky130 PDK. This
-pipeline targets PDK variant hash:
+LibreLane automatically locates your installed PDK with **no path
+configuration needed** — it checks `~/.ciel` by default and uses whichever
+sky130 version `ciel` currently has marked as **enabled**. You do not need
+to hardcode any path or hash anywhere in this repo.
 
-```
-0fe599b2afb6708d281543108caf8310912f54af
-```
-
-### Locating an Existing Local PDK
-
-If your system has already run Ciel-managed projects before, check whether
-this specific version is already cached (should be located in your root directory once inside the nix shell):
+### Check what's installed
 
 ```bash
-ls -la ~/.ciel/ciel/sky130/versions/0fe599b2afb6708d281543108caf8310912f54af/sky130
+ciel ls --pdk-family sky130
 ```
 
-Or check via the Ciel CLI from inside the `nix develop` shell:
+This lists every installed sky130 version and shows which one (if any) is
+currently marked `(enabled)`.
+
+### If nothing is installed
+
+Fetch and enable a known-good version:
 
 ```bash
-ciel ls
-```
-
-### Downloading the PDK (If Missing)
-
-If the `.ciel` directory is empty or this specific hash is missing, fetch
-and activate it:
-
-```bash
-# 1. Fetch the exact tarball distribution
 ciel fetch --pdk-family sky130 0fe599b2afb6708d281543108caf8310912f54af
-
-# 2. Set this hash version as the active PDK
 ciel enable --pdk-family sky130 0fe599b2afb6708d281543108caf8310912f54af
 ```
 
----
+### If a version is installed but not enabled
 
-##  Configuring the Pipeline Path
-
-Before running the pipeline, point the runner script at your local PDK path.
-
-1. Open the runner file:
+This is a common situation where `ciel ls` can show an installed version with no
+`(enabled)` marker next to it. LibreLane will fail with
+`The PDK sky130A was not found.` until you explicitly enable one:
 
 ```bash
-nano my_designs/tto_mux/run_ser_flow.py
+ciel enable --pdk-family sky130 <hash-from-ciel-ls>
 ```
 
-2. Locate the hardcoded PDK path variable and update it with **your**
-   machine's actual home directory and username:
-
-```python
-# Replace 'your_username' with your actual system username
-PDK_PATH = "/home/your_username/.ciel/ciel/sky130/versions/0fe599b2afb6708d281543108caf8310912f54af/sky130"
-```
-
-> Tip: run `echo $HOME` to confirm your home directory path exactly.
+Re-run `ciel ls --pdk-family sky130` afterward to confirm `(enabled)` now
+appears next to that version. Once enabled, LibreLane will find it
+automatically on every run — this is a one-time, per-machine setup step.
 
 ---
 
-##  Executing the Simulation Pipeline
+## Executing the Simulation Pipeline
 
-With your Nix shell active (`nix develop`) and the PDK path configured, run
-the complete analysis:
+With your Nix shell active (`nix develop`) and a PDK enabled, navigate to the tto\_mux example design in the my\_designs folder. Execute the full flow with the following command:
 
 ```bash
-python3 my_designs/tto_mux/run_ser_flow.py
+python3 run_ser_flow.py
 ```
 
 ### What Happens Behind the Scenes
@@ -193,8 +196,8 @@ directory, inside the SER step's own step folder:
 
 ```
 my_designs/tto_mux/runs/ser_extraction_run/<NN>-librelane-seranalysis/
-├── ser_report.txt      # human-readable summary
-└── ser_metrics.json    # machine-readable metrics
+    ser_report.txt      human-readable summary
+    ser_metrics.json    machine-readable metrics
 ```
 
 These metrics are also merged into LibreLane's standard run metrics under:
@@ -209,7 +212,52 @@ You can inspect the raw CircuitOps IR tables directly at:
 CircuitOps/IRs/sky130hd/tto_mux/
 ```
 
+---
 
+## Repository Layout
+
+```
+flake.nix                      Nix flake — pulls in LibreLane + pandas/networkx
+README.md                      this file
+librelane/                     LibreLane source (flows, steps, state, config)
+CircuitOps/                    git submodule — CircuitOps IR/graph generator
+my_designs/tto_mux/
+    tto_mux.v                  Verilog source
+    config.json                LibreLane design configuration
+    run_ser_flow.py             custom flow + SER step definition
+    circuitops_bridge.py        builds NetworkX graph from IR tables
+    epp_algorithm.py            analytical EPP / SER algorithm
+```
+
+---
+
+## Demo Circuit: tto\_mux
+
+`tto_mux` is a 2-to-1 multiplexer built from exactly four gates, used as a
+small, hand-verifiable proof of concept for the full pipeline. It is
+intentionally simple enough that every EPP value below can be checked by
+hand against the pipeline's output.
+
+### Signal Probabilities
+
+Assuming each primary input is independently equally likely to be 0 or 1
+(P = 0.5):
+
+```
+P(S_n) = 1 - P(S)              = 1 - 0.5  = 0.5
+P(G1)  = P(A) * P(S_n)         = 0.5*0.5  = 0.25
+P(G2)  = P(B) * P(S)           = 0.5*0.5  = 0.25
+P(Y)   = P(G1) + P(G2) - P(G1)*P(G2)
+       = 0.25 + 0.25 - 0.0625  = 0.4375
+```
+
+
+
+### Summary Table
+
+*(A circuit diagram illustrating this gate structure will be added here.)*
+
+---
 
 ## Understanding the SER / EPP Report
 
@@ -221,23 +269,7 @@ each gate type (AND, OR, NAND, NOR, XOR, etc.).
 
 - **Average EPP** — overall soft-error sensitivity of the circuit.
 - **Peak EPP** — the single most vulnerable gate's propagation probability.
-- **Top hardening candidates** — gates ranked by individual EPP, useful for
-  prioritizing a limited hardening budget (e.g. redundant logic or hardened
-  cell variants).
-
----
-
-## Known Limitations
-
-- The EPP algorithm assumes primary inputs are independent and equally
-  likely (P = 0.5). It does not yet model realistic input probability
-  distributions or sequential/temporal correlation.
-- Reconvergent fanout (a fault reaching an output through multiple paths)
-  can cause the analytical method to slightly over-approximate EPP compared
-  to true logic simulation — this is a known property of the underlying
-  Asadi & Tahoori method, not a bug in this implementation.
-- Sequential elements are excluded from the graph; EPP is computed over the
-  combinational logic cone only.
+- **Top hardening candidates** — gates ranked by individual EPP
 
 ---
 
@@ -251,7 +283,16 @@ each gate type (AND, OR, NAND, NOR, XOR, etc.).
 | `FileNotFoundError` referencing CircuitOps paths | Submodule not initialized | Run `git submodule update --init --recursive` |
 | `TypeError: Wrong number or type of arguments for overloaded function 'dbBlock_globalConnect'` | CircuitOps' `openroad_helpers.py` was written against an older OpenROAD ODB API; current OpenROAD's `globalConnect` signature has changed | Check the live signature with `openroad -python -c "import odb; help(odb.dbBlock.globalConnect)"` and update the call in `openroad_helpers.py` to match (see inline comment in that file for the patched call) |
 | PDN / floorplan errors on tiny designs | Die area too small for default PDN strap rules | Use a `DIE_AREA` of at least `[0,0,100,100]` with low `FP_CORE_UTIL` (10–20) in `config.json` |
-| Wrong / outdated PDK path | `PDK_PATH` in `run_ser_flow.py` doesn't match this machine | Re-run the `ciel ls` check from the PDK section and update the path |
+| `librelane.config.config.InvalidConfig: The PDK sky130A was not found.` | A sky130 PDK version is installed via `ciel` but not marked `(enabled)` | Run `ciel ls --pdk-family sky130` to find the installed hash, then `ciel enable --pdk-family sky130 <hash>` |
+
+---
+
+## References
+
+G. Asadi and M. B. Tahoori, "An analytical approach for soft error rate
+estimation in digital circuits," *2005 IEEE International Symposium on
+Circuits and Systems (ISCAS)*, Kobe, Japan, 2005, pp. 2991-2994 Vol. 3,
+doi: 10.1109/ISCAS.2005.1465256
 
 ---
 
@@ -262,5 +303,5 @@ each gate type (AND, OR, NAND, NOR, XOR, etc.).
 - **CircuitOps** — ML-friendly circuit graph/IR generation built on
   OpenROAD: https://github.com/NVlabs/CircuitOps
 - **EPP / SER methodology** — based on the analytical Error Propagation
-  Probability approach introduced by Asadi & Tahoori for soft error rate
-  estimation in digital circuits.
+  Probability approach introduced by Asadi & Tahoori (see References) for
+  soft error rate estimation in digital circuits.

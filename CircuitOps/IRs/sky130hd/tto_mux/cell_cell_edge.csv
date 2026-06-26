@@ -1,9 +1,0 @@
-src,tar,src_type,tar_type
-U_AND1,U_OR,cell,cell
-U_AND2,U_OR,cell,cell
-U_INV,U_AND1,cell,cell
-input1,U_AND1,cell,cell
-input2,U_AND2,cell,cell
-input3,U_INV,cell,cell
-input3,U_AND2,cell,cell
-U_OR,output4,cell,cell

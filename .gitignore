@@ -43,3 +43,8 @@ sandbox/
 node_modules/
 yarn.lock
 package.json
+
+# Ignore generated pipeline simulation artifacts
+CircuitOps/IRs/
+CircuitOps/designs/
+**/log

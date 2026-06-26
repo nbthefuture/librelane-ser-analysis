@@ -26,14 +26,14 @@ class SERAnalysisStep(Step):
 
     def run(self, state_in: State, **kwargs) -> State:
         info("Starting Soft Error Rate (SER) Analysis extraction stage...")
-        
+
         design_name = self.config["DESIGN_NAME"]
-        
+
         # 1. Resolve core tool paths based on verified workspace layout
         current_dir = os.path.dirname(os.path.abspath(__file__))
         circuitops_dir = os.path.abspath(os.path.join(current_dir, "../../CircuitOps"))
         target_destination = os.path.join(circuitops_dir, "designs", "sky130hd", design_name)
-        
+
         info(f"Targeting CircuitOps workspace layout directory: {target_destination}")
         os.makedirs(target_destination, exist_ok=True)
 
@@ -50,7 +50,7 @@ class SERAnalysisStep(Step):
             if source_path is None:
                 print(f"[ERROR] Required input artifact missing from previous stages: {target_filename}")
                 raise FileNotFoundError(f"Missing layout artifact key: {target_filename}")
-                
+
             if isinstance(source_path, dict):
                 actual_path = source_path.get("nom_*") or list(source_path.values())[0]
             else:
@@ -61,9 +61,9 @@ class SERAnalysisStep(Step):
             if not os.path.exists(actual_path_str):
                 print(f"[ERROR] Calculated source file path does not exist: {actual_path_str}")
                 raise FileNotFoundError(f"Missing layout artifact file: {actual_path_str}")
-                
+
             dest_file_path = os.path.join(target_destination, target_filename)
-            
+
             if target_filename.endswith(".gz") and not actual_path_str.endswith(".gz"):
                 print(f"[INFO] Compressing text asset: {os.path.basename(actual_path_str)} -> {target_filename}")
                 with open(actual_path_str, "rb") as f_in:
@@ -73,55 +73,62 @@ class SERAnalysisStep(Step):
                 print(f"[INFO] Staging asset directly: {os.path.basename(actual_path_str)} -> {target_filename}")
                 shutil.copyfile(actual_path_str, dest_file_path)
 
-        # 4. Invoke the OpenROAD analytical layout engine 
+        # 4. Invoke the OpenROAD analytical layout engine
         info("Invoking OpenROAD graph generation scripts...")
         ir_directory = os.path.join(circuitops_dir, "IRs", "sky130hd", design_name)
+
+        # IRs/ is intentionally gitignored (tracking it causes Nix to re-hash
+        # the flake on every run, since generated CSVs change each time).
+        # On a fresh clone this means the directory has never been created,
+        # so we must create it explicitly before CircuitOps writes into it.
+        os.makedirs(ir_directory, exist_ok=True)
+
         try:
             script_path = os.path.join(circuitops_dir, "scripts", "python", "generate_tables.py")
-            
+
             import sys
             active_paths = os.pathsep.join(sys.path)
-            
+
             env = os.environ.copy()
             env["PYTHONPATH"] = active_paths
             env["NIX_PYTHONPATH"] = active_paths
-            
+
             subprocess.run([
                 "openroad", "-python", script_path,
                 "-w", "-d", design_name, "-t", "sky130hd"
             ], cwd=circuitops_dir, env=env, check=True)
-            
-            success("✅ CircuitOps layout graph generation and IR tables completed successfully.")
-            
+
+            success("CircuitOps layout graph generation and IR tables completed successfully.")
+
         except subprocess.CalledProcessError as e:
             print(f"[ERROR] OpenROAD execution failed during graph parsing: {e}")
             raise e
 
         # 5. In-Memory Bridge Execution: Compute SER/EPP Algorithm
         info("Executing EPP Algorithm...")
-        
+
         # Add current directory to path so we can import your custom modules dynamically
         import sys
         if current_dir not in sys.path:
             sys.path.append(current_dir)
-            
+
         try:
             import circuitops_bridge as cb
             from epp_algorithm import signal_probability, compute_epp
-            
+
             # Construct graph representation from raw tables
             G = cb.build_graph(ir_directory)
-            
+
             if G.number_of_nodes() == 0:
                 raise ValueError("Generated graph contains 0 logic elements. Processing failed.")
-                
+
             topo = list(cb.nx.topological_sort(G))
             outputs = [n for n in topo if G.out_degree(n) == 0]
             gates = [n for n in topo if G.nodes[n].get("gate") not in ("PI",)]
-            
+
             # Run analytics
             sp = signal_probability(G)
-            
+
             all_epp = []
             gate_epp_map = {}
             for gate in gates:
@@ -130,19 +137,19 @@ class SERAnalysisStep(Step):
                 gate_epp_map[gate] = max_gate_vulnerability
                 for out in outputs:
                     all_epp.append(analytical_map.get(out, 0.0))
-                    
+
             # Compute analytical telemetry metrics
             avg_ser_epp = sum(all_epp) / len(all_epp) if all_epp else 0.0
             max_ser_epp = max(all_epp) if all_epp else 0.0
-            
+
             # Rank hardening candidates
             ranked_candidates = sorted(gate_epp_map.items(), key=lambda x: x[1], reverse=True)[:5]
-            
+
             # 6. Generate Structural Outputs and Logs inside Step Sandbox Directory
             # This step is hermetic; outputs are staged in self.step_dir
             report_txt_path = os.path.join(self.step_dir, "ser_report.txt")
             metrics_json_path = os.path.join(self.step_dir, "ser_metrics.json")
-            
+
             # Write human-readable TXT summary log
             with open(report_txt_path, "w") as txt_f:
                 txt_f.write("====================================================\n")
@@ -170,16 +177,16 @@ class SERAnalysisStep(Step):
             }
             with open(metrics_json_path, "w") as json_f:
                 json.dump(metrics_payload, json_f, indent=4)
-                
+
             success(f"SER calculation complete! Report generated at: {report_txt_path}")
-            
+
             # Return metrics dictionary so it updates the final summary deck
             return {}, {
                 "ser__avg_epp": avg_ser_epp,
                 "ser__max_epp": max_ser_epp,
                 "ser__gate_count": len(gates)
             }
-            
+
         except Exception as ex:
             print(f"[ERROR] Failed to execute analytical EPP routine: {ex}")
             raise ex
@@ -202,16 +209,16 @@ class CustomSERFlow(Classic):
 
 if __name__ == "__main__":
     import sys
-    
+
     sys.argv = ["run_ser_flow.py", "config.json"]
-    
+
     info("Starting LibreLane execution with appended SER analysis...")
-    
+
     flow = CustomSERFlow(
         "config.json",
         pdk="sky130A",
         # If you must hardcode your PDK, uncomment the following line with your exact path
         #pdk_root="/home/nickb/.ciel/ciel/sky130/versions/0fe599b2afb6708d281543108caf8310912f54af"
     )
-    
+
     flow.start(tag="ser_extraction_run")
